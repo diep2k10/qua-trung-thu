@@ -1853,7 +1853,7 @@ async function uploadFileToStorage(file, folder){
 
     const { error } = await client.storage.from(cfg.bucket).upload(path, file, {
         cacheControl: "31536000",
-        contentType: file.type || undefined,
+        contentType: (file.type || (folder === "music" ? "audio/mpeg" : undefined)),
         upsert: false
     });
     if(error) throw error;
@@ -2341,17 +2341,23 @@ $("#uploadMusic").onclick = async ()=>{
     setStorageStatus("Đang tải nhạc lên kho online...", "");
     try{
         const url = await uploadFileToStorage(file, "music");
-        // Dừng và xoá bài cũ trước khi gắn bài mới, tránh trình duyệt tiếp tục dùng audio source cũ.
+        // Dừng và xoá bài cũ trước khi gắn bài mới.
         const audio = $("#audio");
         audio.pause();
         audio.removeAttribute("src");
         audio.load();
         audioOn = false;
         $("#musicBtn").textContent = "🔇";
+
+        // URL do Supabase trả về là nguồn nhạc duy nhất của món quà.
         $("#musicUrl").value = url;
         localStorage.setItem("trungThuMusicUrl", url);
         loadAudio(true);
-        setStorageStatus("Đã tải nhạc lên online và gắn vào món quà.", "ok");
+        saveGift(false);
+        setStorageStatus("Đã tải nhạc lên Supabase, lấy URL công khai và gắn vào món quà. Đang tạo QR...", "ok");
+
+        // Tạo luôn QR mới chứa dữ liệu món quà + URL nhạc mới.
+        await openQR();
     }catch(err){
         console.error(err);
         setStorageStatus("Tải nhạc thất bại: " + (err.message || err), "err");
