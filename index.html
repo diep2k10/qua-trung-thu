@@ -2391,56 +2391,88 @@ function loadSavedGift(){
     }catch(e){ console.warn("Không đọc được món quà đã lưu", e); }
 }
 
-function buildGiftUrl(){
+async function createOnlineGiftUrl(){
+    const cfg = getStorageConfig();
+    if(!cfg) throw new Error("Chưa kết nối kho online");
+
     const data = getGiftData();
     const hasLocalPhotos = photos.some(src => typeof src === "string" && src.startsWith("data:"));
     const hasLocalMusic = $("#musicUrl").value.trim().startsWith("blob:");
-    const payload = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-    const url = location.href.split("#")[0] + "#gift=" + payload;
-    return {url, hasLocalPhotos, hasLocalMusic, size: url.length};
+    if(hasLocalPhotos || hasLocalMusic){
+        throw new Error("Vẫn còn ảnh/nhạc chỉ nằm trên máy. Hãy tải chúng lên kho online trước.");
+    }
+
+    const client = getSupabaseClient();
+    const uid = (crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(36).slice(2));
+    const path = "gifts/" + uid + ".json";
+    const file = new File([JSON.stringify(data)], "gift.json", {type:"application/json"});
+
+    const { error } = await client.storage.from(cfg.bucket).upload(path, file, {
+        cacheControl: "31536000",
+        contentType: "application/json",
+        upsert: false
+    });
+    if(error) throw error;
+
+    const { data: publicData } = client.storage.from(cfg.bucket).getPublicUrl(path);
+    if(!publicData || !publicData.publicUrl) throw new Error("Không lấy được URL công khai của món quà");
+
+    // QR chỉ chứa một URL ngắn trỏ tới manifest online, thay vì nhét toàn bộ ảnh/nhạc vào QR.
+    return location.href.split("#")[0] + "#gifturl=" + encodeURIComponent(publicData.publicUrl);
 }
 
-function openQR(){
+async function openQR(){
     saveGift(false);
-    const result = buildGiftUrl();
     const box = $("#qrCode");
     box.innerHTML = "";
-
-    if(result.hasLocalPhotos || result.hasLocalMusic){
-        $("#qrInfo").textContent = "Món quà còn dữ liệu chỉ nằm trên máy. Hãy tải ảnh/nhạc lên kho online hoặc dùng URL công khai trước khi tạo QR.";
-        $("#qrModal").classList.add("open");
-        return;
-    }
-
-    if(result.size > 2800){
-        $("#qrInfo").textContent = "Món quà đang quá lớn để nhúng toàn bộ vào QR. Hãy giảm số ảnh/lời chúc hoặc tạo ít nội dung hơn.";
-        $("#qrModal").classList.add("open");
-        return;
-    }
+    $("#qrInfo").textContent = "Đang tạo liên kết món quà online...";
+    $("#qrModal").classList.add("open");
 
     try{
-        new QRCode(box, {text: result.url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M});
-        $("#qrInfo").textContent = "QR đã tạo. Người khác quét bằng điện thoại sẽ mở trang GitHub Pages và tải ảnh/nhạc từ kho online.";
-        $("#qrModal").classList.add("open");
-        window.currentGiftQRUrl = result.url;
+        const url = await createOnlineGiftUrl();
+        new QRCode(box, {text: url, width: 280, height: 280, correctLevel: QRCode.CorrectLevel.H});
+        $("#qrInfo").textContent = "Quét mã này để mở món quà. QR đã được rút gọn để điện thoại dễ quét hơn.";
+        window.currentGiftQRUrl = url;
     }catch(e){
-        alert("Không thể tạo QR: " + e.message);
+        console.error(e);
+        box.innerHTML = "";
+        $("#qrInfo").textContent = "Không tạo được QR: " + (e.message || e);
+        setStorageStatus("Tạo QR thất bại: " + (e.message || e), "err");
     }
 }
 
-function applyGiftFromHash(){
-    if(!location.hash.startsWith("#gift=")) return;
+async function applyGiftFromHash(){
     try{
-        const json = decodeURIComponent(escape(atob(location.hash.slice(6))));
-        const d = JSON.parse(json);
-        if(Array.isArray(d.texts)) texts = d.texts;
-        if(typeof d.letter === "string") $("#letterInput").value = d.letter;
-        if(typeof d.music === "string") $("#musicUrl").value = d.music;
-        if(typeof d.photoToggle === "boolean") $("#photoToggle").checked = d.photoToggle;
-        if(typeof d.particleToggle === "boolean") $("#particleToggle").checked = d.particleToggle;
-        if(typeof d.letterToggle === "boolean") $("#letterToggle").checked = d.letterToggle;
-        if(Array.isArray(d.photos) && d.photos.length) photos = d.photos;
-    }catch(e){ console.warn("QR không hợp lệ", e); }
+        if(location.hash.startsWith("#gifturl=")){
+            const manifestUrl = decodeURIComponent(location.hash.slice(9));
+            const res = await fetch(manifestUrl, {cache:"no-store"});
+            if(!res.ok) throw new Error("Không tải được dữ liệu món quà (HTTP " + res.status + ")");
+            const d = await res.json();
+            applyGiftData(d);
+            return;
+        }
+
+        if(location.hash.startsWith("#gift=")){
+            const json = decodeURIComponent(escape(atob(location.hash.slice(6))));
+            applyGiftData(JSON.parse(json));
+        }
+    }catch(e){
+        console.warn("Không tải được món quà từ QR", e);
+        setStorageStatus("Không tải được món quà từ QR: " + (e.message || e), "err");
+    }
+}
+
+function applyGiftData(d){
+    if(Array.isArray(d.texts)) texts = d.texts;
+    if(typeof d.letter === "string") $("#letterInput").value = d.letter;
+    if(typeof d.music === "string") $("#musicUrl").value = d.music;
+    if(typeof d.photoToggle === "boolean") $("#photoToggle").checked = d.photoToggle;
+    if(typeof d.particleToggle === "boolean") $("#particleToggle").checked = d.particleToggle;
+    if(typeof d.letterToggle === "boolean") $("#letterToggle").checked = d.letterToggle;
+    if(Array.isArray(d.photos) && d.photos.length) photos = d.photos;
+    renderTextInputs();
+    renderPreviews();
+    loadAudio();
 }
 
 $("#saveGift").onclick = ()=>saveGift(true);
