@@ -1598,12 +1598,11 @@ textarea{resize:vertical;min-height:90px}
         <label class="title">💌 Nội dung lá thư</label>
         <textarea id="letterInput">Trung Thu này, chúc em luôn vui vẻ, luôn rạng rỡ như ánh trăng và mỗi ngày đều có thật nhiều điều hạnh phúc. Cảm ơn em vì đã xuất hiện trong cuộc đời anh. Mong rằng chúng ta sẽ còn cùng nhau đón thật nhiều mùa Trung Thu nữa. Yêu em nhiều lắm ❤️</textarea>
 
-        <label class="title">🎵 Nhạc nền</label>
-        <input id="musicUrl" type="url" value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3" placeholder="URL file MP3">
-        <button class="btn" id="loadMusic">Đổi nhạc từ URL</button>
+        <label class="title">🎵 Nhạc nền (chỉ MP3 bạn tải lên)</label>
+        <input id="musicUrl" type="url" value="" placeholder="Chưa có nhạc — hãy chọn file MP3 bên dưới" readonly>
         <div class="file-upload-row">
             <input id="musicFile" type="file" accept="audio/*">
-            <button class="btn" id="uploadMusic" type="button">☁️ Tải nhạc</button>
+            <button class="btn" id="uploadMusic" type="button">☁️ Tải MP3 lên & dùng làm nhạc</button>
         </div>
 
         <div class="storage-box">
@@ -2394,7 +2393,8 @@ function loadSavedGift(){
         const d = JSON.parse(raw);
         if(Array.isArray(d.texts)) texts = d.texts;
         if(typeof d.letter === "string") $("#letterInput").value = d.letter;
-        if(typeof d.music === "string") $("#musicUrl").value = d.music;
+        const uploadedMusic = localStorage.getItem("trungThuMusicUrl");
+        $("#musicUrl").value = uploadedMusic || "";
         if(typeof d.photoToggle === "boolean") $("#photoToggle").checked = d.photoToggle;
         if(typeof d.particleToggle === "boolean") $("#particleToggle").checked = d.particleToggle;
         if(typeof d.letterToggle === "boolean") $("#letterToggle").checked = d.letterToggle;
@@ -2516,6 +2516,13 @@ $("#downloadQR").onclick = ()=>{
     a.click();
 };
 
+// Không dùng lại nhạc mặc định/nhạc cũ đã lưu trên máy. Chỉ dùng MP3 đã upload lên Supabase.
+if(!localStorage.getItem("trungThuMusicUrl")){
+    try{
+        const saved = JSON.parse(localStorage.getItem("trungThuGift") || "null");
+        if(saved && saved.music) { saved.music = ""; localStorage.setItem("trungThuGift", JSON.stringify(saved)); }
+    }catch(e){}
+}
 loadStorageConfig();
 loadSavedGift();
 applyGiftFromHash();
@@ -2546,15 +2553,6 @@ function loadAudio(forceFresh=false){
     };
 }
 
-
-$("#loadMusic").onclick = ()=>{
-
-    loadAudio(true);
-
-    audioOn = false;
-
-    $("#musicBtn").textContent = "🔇";
-};
 
 
 $("#musicBtn").onclick = async ()=>{
