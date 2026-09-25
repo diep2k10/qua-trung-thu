@@ -2341,8 +2341,16 @@ $("#uploadMusic").onclick = async ()=>{
     setStorageStatus("Đang tải nhạc lên kho online...", "");
     try{
         const url = await uploadFileToStorage(file, "music");
+        // Dừng và xoá bài cũ trước khi gắn bài mới, tránh trình duyệt tiếp tục dùng audio source cũ.
+        const audio = $("#audio");
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        audioOn = false;
+        $("#musicBtn").textContent = "🔇";
         $("#musicUrl").value = url;
-        loadAudio();
+        localStorage.setItem("trungThuMusicUrl", url);
+        loadAudio(true);
         setStorageStatus("Đã tải nhạc lên online và gắn vào món quà.", "ok");
     }catch(err){
         console.error(err);
@@ -2510,18 +2518,32 @@ applyGiftFromHash();
    NHẠC
 ========================= */
 
-function loadAudio(){
+function loadAudio(forceFresh=false){
+    const audio = $("#audio");
+    const url = $("#musicUrl").value.trim();
 
-    $("#audio").src =
-        $("#musicUrl").value.trim();
+    // Luôn dừng source cũ trước khi đổi sang bài mới.
+    audio.pause();
+    audioOn = false;
+    $("#musicBtn").textContent = "🔇";
+    audio.removeAttribute("src");
+    audio.load();
 
-    $("#audio").load();
+    if(!url) return;
+
+    // URL Supabase là duy nhất; thêm cache-buster khi vừa upload/đổi bài để tránh cache cũ.
+    audio.src = forceFresh ? url + (url.includes("?") ? "&" : "?") + "v=" + Date.now() : url;
+    audio.load();
+
+    audio.onerror = () => {
+        console.warn("Không phát được nhạc:", audio.currentSrc || url);
+    };
 }
 
 
 $("#loadMusic").onclick = ()=>{
 
-    loadAudio();
+    loadAudio(true);
 
     audioOn = false;
 
