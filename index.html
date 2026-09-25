@@ -1457,6 +1457,15 @@ textarea{resize:vertical;min-height:90px}
 #qrCode{display:flex;justify-content:center;align-items:center;background:#fff;padding:12px;border-radius:14px;min-height:230px}
 #qrCode img,#qrCode canvas{max-width:100%;height:auto!important}
 .qr-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.storage-box{margin-top:14px;padding:12px;border:1px dashed #ffc1d8;border-radius:14px;background:#fff8fb}
+.storage-box h3{margin:0 0 7px;font-size:14px;color:#d63378}
+.storage-box input{margin-top:6px}
+.storage-status{font-size:12px;color:#777;line-height:1.45;margin-top:7px}
+.storage-status.ok{color:#16834b}
+.storage-status.err{color:#c62828}
+.file-upload-row{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:center;margin-top:7px}
+.file-upload-row .btn{margin-top:0}
+
 @media(max-width:520px){.gift-actions{grid-template-columns:1fr}.qr-card{padding:18px}}
 </style>
 </head>
@@ -1591,7 +1600,20 @@ textarea{resize:vertical;min-height:90px}
 
         <label class="title">🎵 Nhạc nền</label>
         <input id="musicUrl" type="url" value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3" placeholder="URL file MP3">
-        <button class="btn" id="loadMusic">Đổi nhạc</button>
+        <button class="btn" id="loadMusic">Đổi nhạc từ URL</button>
+        <div class="file-upload-row">
+            <input id="musicFile" type="file" accept="audio/*">
+            <button class="btn" id="uploadMusic" type="button">☁️ Tải nhạc</button>
+        </div>
+
+        <div class="storage-box">
+            <h3>☁️ Kho lưu trữ online</h3>
+            <input id="supabaseUrl" type="url" placeholder="Supabase Project URL">
+            <input id="supabaseKey" type="text" placeholder="Supabase Publishable Key">
+            <input id="supabaseBucket" type="text" value="gift-files" placeholder="Tên bucket, ví dụ: gift-files">
+            <button class="btn" id="saveStorage" type="button">🔗 Kết nối kho online</button>
+            <div class="storage-status" id="storageStatus">Chưa kết nối. Bạn vẫn có thể dùng URL ảnh/nhạc công khai.</div>
+        </div>
 
         <div class="gift-actions">
             <button class="btn" id="saveGift">💾 Lưu món quà</button>
@@ -1623,7 +1645,7 @@ textarea{resize:vertical;min-height:90px}
         </div>
 
         <p class="small">
-            Ảnh bạn chọn chỉ được dùng trong trình duyệt hiện tại.
+            Khi đã kết nối kho online, ảnh/nhạc bạn chọn sẽ được tải lên Internet và QR có thể chia sẻ sang điện thoại khác.
         </p>
 
     </aside>
@@ -1646,6 +1668,7 @@ textarea{resize:vertical;min-height:90px}
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* =========================
    BIẾN
@@ -1818,23 +1841,57 @@ function renderPreviews(){
    CHỌN ẢNH
 ========================= */
 
-$("#photoInput").onchange = e => {
+async function uploadFileToStorage(file, folder){
+    const cfg = getStorageConfig();
+    if(!cfg) throw new Error("Chưa cấu hình kho online");
+    if(!window.supabase) throw new Error("Không tải được thư viện Supabase");
 
-    [...e.target.files].forEach(f=>{
+    const client = getSupabaseClient();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+    const uid = (crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(36).slice(2));
+    const path = folder + "/" + uid + "-" + safeName;
 
-        let r = new FileReader();
-
-        r.onload = ()=>{
-
-            photos.push(r.result);
-
-            renderPreviews();
-        };
-
-        r.readAsDataURL(f);
+    const { error } = await client.storage.from(cfg.bucket).upload(path, file, {
+        cacheControl: "31536000",
+        contentType: file.type || undefined,
+        upsert: false
     });
+    if(error) throw error;
 
-    /* Cho phép chọn lại cùng ảnh */
+    const { data } = client.storage.from(cfg.bucket).getPublicUrl(path);
+    return data.publicUrl;
+}
+
+$("#photoInput").onchange = async e => {
+    const files = [...e.target.files];
+    if(!files.length) return;
+
+    const cfg = getStorageConfig();
+    if(!cfg){
+        files.forEach(f=>{
+            const r = new FileReader();
+            r.onload = ()=>{ photos.push(r.result); renderPreviews(); };
+            r.readAsDataURL(f);
+        });
+        setStorageStatus("Chưa kết nối kho online: ảnh chỉ nằm trên máy này.", "err");
+        e.target.value = "";
+        return;
+    }
+
+    setStorageStatus("Đang tải ảnh lên kho online...", "");
+    try{
+        for(const f of files){
+            if(!f.type.startsWith("image/")) continue;
+            const url = await uploadFileToStorage(f, "photos");
+            photos.push(url);
+            renderPreviews();
+        }
+        setStorageStatus("Đã tải ảnh lên online. Khi tạo QR, người khác cũng xem được ảnh.", "ok");
+    }catch(err){
+        console.error(err);
+        setStorageStatus("Tải ảnh thất bại: " + (err.message || err), "err");
+        alert("Không tải được ảnh lên kho online. Kiểm tra bucket và policy Supabase.");
+    }
     e.target.value = "";
 };
 
@@ -2210,6 +2267,91 @@ $("#settingsBtn").onclick = () =>
 
 
 /* =========================
+   KHO LƯU TRỮ ONLINE (SUPABASE)
+========================= */
+let supabaseClient = null;
+
+function getStorageConfig(){
+    try{
+        const d = JSON.parse(localStorage.getItem("trungThuStorage") || "null");
+        if(!d || !d.url || !d.key || !d.bucket) return null;
+        return d;
+    }catch{ return null; }
+}
+
+function setStorageStatus(msg, type=""){
+    const el = $("#storageStatus");
+    if(!el) return;
+    el.textContent = msg;
+    el.className = "storage-status" + (type ? " " + type : "");
+}
+
+function getSupabaseClient(){
+    const cfg = getStorageConfig();
+    if(!cfg) throw new Error("Chưa cấu hình kho online");
+    if(!window.supabase) throw new Error("Thư viện Supabase chưa tải xong");
+    if(!supabaseClient || supabaseClient.__url !== cfg.url || supabaseClient.__key !== cfg.key){
+        supabaseClient = window.supabase.createClient(cfg.url, cfg.key, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+        });
+        supabaseClient.__url = cfg.url;
+        supabaseClient.__key = cfg.key;
+    }
+    return supabaseClient;
+}
+
+function loadStorageConfig(){
+    const cfg = getStorageConfig();
+    if(!cfg) return;
+    $("#supabaseUrl").value = cfg.url;
+    $("#supabaseKey").value = cfg.key;
+    $("#supabaseBucket").value = cfg.bucket;
+    setStorageStatus("Đã lưu cấu hình kho online trên trình duyệt này. Hãy bấm Kết nối kho online để kiểm tra.", "ok");
+}
+
+$("#saveStorage").onclick = async ()=>{
+    const url = $("#supabaseUrl").value.trim().replace(/\/$/, "");
+    const key = $("#supabaseKey").value.trim();
+    const bucket = $("#supabaseBucket").value.trim() || "gift-files";
+    if(!/^https:\/\/[^\s]+$/.test(url) || !key){
+        setStorageStatus("Vui lòng nhập Project URL và Publishable Key của Supabase.", "err");
+        return;
+    }
+    localStorage.setItem("trungThuStorage", JSON.stringify({url, key, bucket}));
+    supabaseClient = null;
+    try{
+        const client = getSupabaseClient();
+        const { data, error } = await client.storage.from(bucket).list("", { limit: 1 });
+        if(error) throw error;
+        setStorageStatus("Kết nối thành công. Bạn có thể tải ảnh và nhạc lên online. Ảnh/nhạc sẽ dùng được khi quét QR.", "ok");
+    }catch(err){
+        console.error(err);
+        setStorageStatus("Chưa kết nối được: " + (err.message || err) + ". Hãy kiểm tra bucket và Storage policy.", "err");
+    }
+};
+
+$("#uploadMusic").onclick = async ()=>{
+    const file = $("#musicFile").files[0];
+    if(!file) return alert("Hãy chọn một file nhạc trước.");
+    if(!file.type.startsWith("audio/")) return alert("File này không phải file âm thanh.");
+    if(file.size > 6 * 1024 * 1024){
+        return alert("File nhạc lớn hơn 6MB. Bản này dùng upload chuẩn; hãy chọn file nhỏ hơn 6MB hoặc dùng upload resumable.");
+    }
+    if(!getStorageConfig()) return alert("Hãy kết nối kho online trước.");
+    setStorageStatus("Đang tải nhạc lên kho online...", "");
+    try{
+        const url = await uploadFileToStorage(file, "music");
+        $("#musicUrl").value = url;
+        loadAudio();
+        setStorageStatus("Đã tải nhạc lên online và gắn vào món quà.", "ok");
+    }catch(err){
+        console.error(err);
+        setStorageStatus("Tải nhạc thất bại: " + (err.message || err), "err");
+        alert("Không tải được nhạc. Kiểm tra bucket và policy Supabase.");
+    }
+};
+
+/* =========================
    LƯU MÓN QUÀ + TẠO QR
 ========================= */
 function getGiftData(){
@@ -2243,15 +2385,19 @@ function loadSavedGift(){
         if(typeof d.particleToggle === "boolean") $("#particleToggle").checked = d.particleToggle;
         if(typeof d.letterToggle === "boolean") $("#letterToggle").checked = d.letterToggle;
         if(Array.isArray(d.photos) && d.photos.length) photos = d.photos;
+        renderTextInputs();
+        renderPreviews();
+        loadAudio();
     }catch(e){ console.warn("Không đọc được món quà đã lưu", e); }
 }
 
 function buildGiftUrl(){
     const data = getGiftData();
     const hasLocalPhotos = photos.some(src => typeof src === "string" && src.startsWith("data:"));
+    const hasLocalMusic = $("#musicUrl").value.trim().startsWith("blob:");
     const payload = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
     const url = location.href.split("#")[0] + "#gift=" + payload;
-    return {url, hasLocalPhotos, size: url.length};
+    return {url, hasLocalPhotos, hasLocalMusic, size: url.length};
 }
 
 function openQR(){
@@ -2260,17 +2406,21 @@ function openQR(){
     const box = $("#qrCode");
     box.innerHTML = "";
 
+    if(result.hasLocalPhotos || result.hasLocalMusic){
+        $("#qrInfo").textContent = "Món quà còn dữ liệu chỉ nằm trên máy. Hãy tải ảnh/nhạc lên kho online hoặc dùng URL công khai trước khi tạo QR.";
+        $("#qrModal").classList.add("open");
+        return;
+    }
+
     if(result.size > 2800){
-        $("#qrInfo").textContent = "Món quà đang quá lớn để nhúng toàn bộ vào QR. Hãy dùng ảnh bằng URL hoặc giảm số ảnh/lời chúc. Nhạc nên là URL MP3.";
+        $("#qrInfo").textContent = "Món quà đang quá lớn để nhúng toàn bộ vào QR. Hãy giảm số ảnh/lời chúc hoặc tạo ít nội dung hơn.";
         $("#qrModal").classList.add("open");
         return;
     }
 
     try{
         new QRCode(box, {text: result.url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M});
-        $("#qrInfo").textContent = result.hasLocalPhotos
-            ? "QR đã tạo. Ảnh tải trực tiếp từ máy chưa thể truyền sang thiết bị khác bằng QR; hãy dùng ảnh có URL công khai."
-            : "Quét mã bằng điện thoại để mở món quà trên trang này.";
+        $("#qrInfo").textContent = "QR đã tạo. Người khác quét bằng điện thoại sẽ mở trang GitHub Pages và tải ảnh/nhạc từ kho online.";
         $("#qrModal").classList.add("open");
         window.currentGiftQRUrl = result.url;
     }catch(e){
@@ -2313,6 +2463,7 @@ $("#downloadQR").onclick = ()=>{
     a.click();
 };
 
+loadStorageConfig();
 applyGiftFromHash();
 loadSavedGift();
 
@@ -2874,6 +3025,7 @@ updateView();
 
 renderTextInputs();
 renderPreviews();
+loadAudio();
 loadAudio();
 </script>
 
