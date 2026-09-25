@@ -1381,15 +1381,36 @@ textarea{resize:vertical;min-height:90px}
 .switch input:checked+.slider{background:#ff5d9e}
 .switch input:checked+.slider:before{transform:translateX(20px)}
 
+/* Tối ưu hiệu năng mobile: giảm blur, shadow và 3D nặng. */
+@media(max-width:800px){
+    #stars{opacity:.45}
+    .cloud{filter:none;opacity:.28}
+    .moon-main{box-shadow:0 0 28px rgba(255,229,139,.45)}
+    .photo{
+        box-shadow:0 5px 14px rgba(0,0,0,.35);
+        transform-style:flat;
+        will-change:transform,opacity;
+        animation-name:photoFloatMobile;
+    }
+    .light{box-shadow:none}
+    .nav button{backdrop-filter:none}
+}
+
+@keyframes photoFloatMobile{
+    0%{transform:translate3d(var(--photoX),var(--edgeY),0) rotateZ(var(--rotate)) scale(1);opacity:0}
+    10%{opacity:.95}
+    50%{transform:translate3d(var(--photoMidX),50vh,0) rotateZ(var(--rotate)) scale(.78);opacity:.85}
+    100%{transform:translate3d(var(--photoEndX),-15vh,0) rotateZ(var(--rotate)) scale(.35);opacity:0}
+}
+
 @media(max-width:800px){
     #app{display:block}
     .stage{height:100%;width:100%}
-    .sidebar{
-        position:absolute;left:0;right:0;bottom:0;width:100%;
-        max-height:44%;border-radius:18px 18px 0 0;
-        transform:translateY(100%);transition:.35s;
-    }
-    .sidebar.open{transform:translateY(0)}
+
+    /* Điện thoại chỉ dùng để XEM món quà. Không cho mở phần chỉnh sửa. */
+    .sidebar{display:none !important}
+    #settingsBtn{display:none !important}
+
     .moon-main{width:125px;height:125px;right:8%;top:7%}
     .photo{width:92px;height:118px}
     .float-text{font-size:22px}
@@ -2200,24 +2221,26 @@ function spawnParticle(){
 }
 
 
-/* NHIỀU CHỮ */
-/* Tạo sẵn nhiều chữ ngay khi bắt đầu */
-for(let i = 0; i < 18; i++){
+/* =========================
+   HIỆU NĂNG ĐIỆN THOẠI
+   Giảm số lượng phần tử động để máy yếu không bị lag.
+========================= */
+const isMobileDevice = window.matchMedia("(max-width: 800px)").matches ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
-    setTimeout(
-        spawnText,
-        i * 180
-    );
+/* NHIỀU CHỮ */
+const initialTextCount = isMobileDevice ? 7 : 18;
+const textIntervalMs = isMobileDevice ? 1400 : 600;
+const photoIntervalMs = isMobileDevice ? 3600 : 1500;
+const particleIntervalMs = isMobileDevice ? 950 : 360;
+
+for(let i = 0; i < initialTextCount; i++){
+    setTimeout(spawnText, i * (isMobileDevice ? 300 : 180));
 }
 
-/* Sau đó tiếp tục sinh chữ */
-setInterval(spawnText,600);
-
-/* ẢNH BAY NHIỀU HƠN */
-setInterval(spawnPhoto,1500);
-
-/* TIM / HOA / ÁNH SÁNG */
-setInterval(spawnParticle,360);
+setInterval(spawnText, textIntervalMs);
+setInterval(spawnPhoto, photoIntervalMs);
+setInterval(spawnParticle, particleIntervalMs);
 
 
 /* =========================
@@ -2262,8 +2285,10 @@ $("#closeLetter").onclick = () =>
    SETTINGS MOBILE
 ========================= */
 
-$("#settingsBtn").onclick = () =>
-    $("#sidebar").classList.toggle("open");
+const settingsBtn = $("#settingsBtn");
+if(settingsBtn){
+    settingsBtn.onclick = () => $("#sidebar").classList.toggle("open");
+}
 
 
 /* =========================
@@ -2417,9 +2442,10 @@ async function createOnlineGiftUrl(){
     const { data: publicData } = client.storage.from(cfg.bucket).getPublicUrl(path);
     if(!publicData || !publicData.publicUrl) throw new Error("Không lấy được URL công khai của món quà");
 
-    // QR chỉ chứa một URL ngắn trỏ tới manifest online, thay vì nhét toàn bộ ảnh/nhạc vào QR.
+    // Dùng hash thay vì query + encodeURIComponent để QR ngắn hơn và dễ quét hơn.
+    // Hash vẫn giữ nguyên URL Supabase (https://.../gifts/....json), không cần mã hóa %xx.
     const pageUrl = "https://diep2k10.github.io/qua-trung-thu/";
-    return pageUrl + "?gifturl=" + encodeURIComponent(publicData.publicUrl);
+    return pageUrl + "#gifturl=" + publicData.publicUrl;
 }
 
 async function openQR(){
@@ -2431,8 +2457,12 @@ async function openQR(){
 
     try{
         const url = await createOnlineGiftUrl();
-        new QRCode(box, {text: url, width: 280, height: 280, correctLevel: QRCode.CorrectLevel.H});
-        $("#qrInfo").textContent = "Quét mã này để mở món quà. QR đã được rút gọn để điện thoại dễ quét hơn.";
+        if(!/^https:\/\/diep2k10\.github\.io\/qua-trung-thu\/#gifturl=https:\/\//.test(url)){
+            throw new Error("Liên kết QR không đúng định dạng GitHub Pages/Supabase");
+        }
+        // QR lớn hơn + mức sửa lỗi M: giảm mật độ ô, điện thoại dễ nhận diện hơn.
+        new QRCode(box, {text: url, width: 360, height: 360, correctLevel: QRCode.CorrectLevel.M});
+        $("#qrInfo").textContent = "Quét mã này để mở món quà. QR dùng liên kết ngắn để dễ quét.";
         window.currentGiftQRUrl = url;
     }catch(e){
         console.error(e);
@@ -2454,7 +2484,8 @@ async function applyGiftFromHash(){
             return;
         }
         if(location.hash.startsWith("#gifturl=")){
-            const legacyUrl = decodeURIComponent(location.hash.slice(9));
+            // URL manifest được giữ nguyên trong hash nên không cần decodeURIComponent.
+            const legacyUrl = location.hash.slice(9);
             const res = await fetch(legacyUrl, {cache:"no-store"});
             if(!res.ok) throw new Error("Không tải được dữ liệu món quà (HTTP " + res.status + ")");
             applyGiftData(await res.json());
@@ -2760,7 +2791,9 @@ function stars(canvas){
     );
 
 
-    for(let i=0;i<180;i++){
+    const starCount = isMobileDevice ? 70 : 180;
+
+    for(let i=0;i<starCount;i++){
 
         pts.push({
             x:Math.random(),
@@ -2773,6 +2806,11 @@ function stars(canvas){
 
 
     function draw(){
+
+        if(document.hidden){
+            requestAnimationFrame(draw);
+            return;
+        }
 
         x.clearRect(
             0,
