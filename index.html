@@ -1598,11 +1598,12 @@ textarea{resize:vertical;min-height:90px}
         <label class="title">💌 Nội dung lá thư</label>
         <textarea id="letterInput">Trung Thu này, chúc em luôn vui vẻ, luôn rạng rỡ như ánh trăng và mỗi ngày đều có thật nhiều điều hạnh phúc. Cảm ơn em vì đã xuất hiện trong cuộc đời anh. Mong rằng chúng ta sẽ còn cùng nhau đón thật nhiều mùa Trung Thu nữa. Yêu em nhiều lắm ❤️</textarea>
 
-        <label class="title">🎵 Nhạc nền (chỉ MP3 bạn tải lên)</label>
-        <input id="musicUrl" type="url" value="" placeholder="Chưa có nhạc — hãy chọn file MP3 bên dưới" readonly>
+        <label class="title">🎵 Nhạc nền</label>
+        <input id="musicUrl" type="url" value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3" placeholder="URL file MP3">
+        <button class="btn" id="loadMusic">Đổi nhạc từ URL</button>
         <div class="file-upload-row">
             <input id="musicFile" type="file" accept="audio/*">
-            <button class="btn" id="uploadMusic" type="button">☁️ Tải MP3 lên & dùng làm nhạc</button>
+            <button class="btn" id="uploadMusic" type="button">☁️ Tải nhạc</button>
         </div>
 
         <div class="storage-box">
@@ -1852,7 +1853,7 @@ async function uploadFileToStorage(file, folder){
 
     const { error } = await client.storage.from(cfg.bucket).upload(path, file, {
         cacheControl: "31536000",
-        contentType: (file.type || (folder === "music" ? "audio/mpeg" : undefined)),
+        contentType: file.type || undefined,
         upsert: false
     });
     if(error) throw error;
@@ -2340,23 +2341,9 @@ $("#uploadMusic").onclick = async ()=>{
     setStorageStatus("Đang tải nhạc lên kho online...", "");
     try{
         const url = await uploadFileToStorage(file, "music");
-        // Dừng và xoá bài cũ trước khi gắn bài mới.
-        const audio = $("#audio");
-        audio.pause();
-        audio.removeAttribute("src");
-        audio.load();
-        audioOn = false;
-        $("#musicBtn").textContent = "🔇";
-
-        // URL do Supabase trả về là nguồn nhạc duy nhất của món quà.
         $("#musicUrl").value = url;
-        localStorage.setItem("trungThuMusicUrl", url);
-        loadAudio(true);
-        saveGift(false);
-        setStorageStatus("Đã tải nhạc lên Supabase, lấy URL công khai và gắn vào món quà. Đang tạo QR...", "ok");
-
-        // Tạo luôn QR mới chứa dữ liệu món quà + URL nhạc mới.
-        await openQR();
+        loadAudio();
+        setStorageStatus("Đã tải nhạc lên online và gắn vào món quà.", "ok");
     }catch(err){
         console.error(err);
         setStorageStatus("Tải nhạc thất bại: " + (err.message || err), "err");
@@ -2393,8 +2380,7 @@ function loadSavedGift(){
         const d = JSON.parse(raw);
         if(Array.isArray(d.texts)) texts = d.texts;
         if(typeof d.letter === "string") $("#letterInput").value = d.letter;
-        const uploadedMusic = localStorage.getItem("trungThuMusicUrl");
-        $("#musicUrl").value = uploadedMusic || "";
+        if(typeof d.music === "string") $("#musicUrl").value = d.music;
         if(typeof d.photoToggle === "boolean") $("#photoToggle").checked = d.photoToggle;
         if(typeof d.particleToggle === "boolean") $("#particleToggle").checked = d.particleToggle;
         if(typeof d.letterToggle === "boolean") $("#letterToggle").checked = d.letterToggle;
@@ -2516,13 +2502,6 @@ $("#downloadQR").onclick = ()=>{
     a.click();
 };
 
-// Không dùng lại nhạc mặc định/nhạc cũ đã lưu trên máy. Chỉ dùng MP3 đã upload lên Supabase.
-if(!localStorage.getItem("trungThuMusicUrl")){
-    try{
-        const saved = JSON.parse(localStorage.getItem("trungThuGift") || "null");
-        if(saved && saved.music) { saved.music = ""; localStorage.setItem("trungThuGift", JSON.stringify(saved)); }
-    }catch(e){}
-}
 loadStorageConfig();
 loadSavedGift();
 applyGiftFromHash();
@@ -2531,28 +2510,23 @@ applyGiftFromHash();
    NHẠC
 ========================= */
 
-function loadAudio(forceFresh=false){
-    const audio = $("#audio");
-    const url = $("#musicUrl").value.trim();
+function loadAudio(){
 
-    // Luôn dừng source cũ trước khi đổi sang bài mới.
-    audio.pause();
-    audioOn = false;
-    $("#musicBtn").textContent = "🔇";
-    audio.removeAttribute("src");
-    audio.load();
+    $("#audio").src =
+        $("#musicUrl").value.trim();
 
-    if(!url) return;
-
-    // URL Supabase là duy nhất; thêm cache-buster khi vừa upload/đổi bài để tránh cache cũ.
-    audio.src = forceFresh ? url + (url.includes("?") ? "&" : "?") + "v=" + Date.now() : url;
-    audio.load();
-
-    audio.onerror = () => {
-        console.warn("Không phát được nhạc:", audio.currentSrc || url);
-    };
+    $("#audio").load();
 }
 
+
+$("#loadMusic").onclick = ()=>{
+
+    loadAudio();
+
+    audioOn = false;
+
+    $("#musicBtn").textContent = "🔇";
+};
 
 
 $("#musicBtn").onclick = async ()=>{
