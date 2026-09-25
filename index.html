@@ -2418,7 +2418,8 @@ async function createOnlineGiftUrl(){
     if(!publicData || !publicData.publicUrl) throw new Error("Không lấy được URL công khai của món quà");
 
     // QR chỉ chứa một URL ngắn trỏ tới manifest online, thay vì nhét toàn bộ ảnh/nhạc vào QR.
-    return location.href.split("#")[0] + "#gifturl=" + encodeURIComponent(publicData.publicUrl);
+    const pageUrl = "https://diep2k10.github.io/qua-trung-thu/";
+    return pageUrl + "?gifturl=" + encodeURIComponent(publicData.publicUrl);
 }
 
 async function openQR(){
@@ -2443,15 +2444,22 @@ async function openQR(){
 
 async function applyGiftFromHash(){
     try{
-        if(location.hash.startsWith("#gifturl=")){
-            const manifestUrl = decodeURIComponent(location.hash.slice(9));
+        const params = new URLSearchParams(location.search);
+        const manifestUrl = params.get("gifturl");
+        if(manifestUrl){
             const res = await fetch(manifestUrl, {cache:"no-store"});
             if(!res.ok) throw new Error("Không tải được dữ liệu món quà (HTTP " + res.status + ")");
             const d = await res.json();
             applyGiftData(d);
             return;
         }
-
+        if(location.hash.startsWith("#gifturl=")){
+            const legacyUrl = decodeURIComponent(location.hash.slice(9));
+            const res = await fetch(legacyUrl, {cache:"no-store"});
+            if(!res.ok) throw new Error("Không tải được dữ liệu món quà (HTTP " + res.status + ")");
+            applyGiftData(await res.json());
+            return;
+        }
         if(location.hash.startsWith("#gift=")){
             const json = decodeURIComponent(escape(atob(location.hash.slice(6))));
             applyGiftData(JSON.parse(json));
@@ -2461,7 +2469,6 @@ async function applyGiftFromHash(){
         setStorageStatus("Không tải được món quà từ QR: " + (e.message || e), "err");
     }
 }
-
 function applyGiftData(d){
     if(Array.isArray(d.texts)) texts = d.texts;
     if(typeof d.letter === "string") $("#letterInput").value = d.letter;
@@ -2496,8 +2503,8 @@ $("#downloadQR").onclick = ()=>{
 };
 
 loadStorageConfig();
-applyGiftFromHash();
 loadSavedGift();
+applyGiftFromHash();
 
 /* =========================
    NHẠC
